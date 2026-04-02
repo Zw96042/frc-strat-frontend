@@ -1,6 +1,7 @@
 'use client';
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -8,6 +9,7 @@ import {
   createSourceJob,
   deleteJob,
   deleteMatch,
+  fetchCalibrationPresets,
   fetchFuelState,
   fetchJob,
   fetchJobs,
@@ -29,7 +31,7 @@ import {
   fetchJsonAirProfile,
   fetchJsonFieldMap,
 } from "@/lib/fuelFieldVisualization";
-import type { AirProfileData, FieldMapData, FuelAnalysisRecord, FuelCalibration, JobRecord, MatchRecord, MatchSummary, TbaMatch, TrackRecord, WatchbotState } from "@/lib/types";
+import type { AirProfileData, CalibrationPreset, FieldMapData, FuelAnalysisRecord, FuelCalibration, JobRecord, MatchRecord, MatchSummary, TbaMatch, TrackRecord, WatchbotState } from "@/lib/types";
 
 const FUEL_FIELD_IMAGE_SRC = "/assets/rebuilt-field.png";
 
@@ -163,7 +165,11 @@ function dedupeVisibleTracks(tracks: TrackRecord[]): TrackRecord[] {
   const deduped: TrackRecord[] = [];
   for (const track of preferred) {
     const existingIndex = deduped.findIndex((kept) => (
-      Math.hypot(track.x - kept.x, track.y - kept.y) <= TRACK_SWITCH_DEDUPE_DISTANCE_IN
+      kept.track_id === track.track_id || (
+        kept.tracking_source === "detection" &&
+        track.tracking_source === "detection" &&
+        Math.hypot(track.x - kept.x, track.y - kept.y) <= TRACK_SWITCH_DEDUPE_DISTANCE_IN
+      )
     ));
 
     if (existingIndex === -1) {
@@ -183,8 +189,10 @@ type VideoFrameSyncVideo = HTMLVideoElement & {
 };
 
 export default function UnifiedMatchConsole() {
+  const router = useRouter();
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [matches, setMatches] = useState<MatchSummary[]>([]);
+  const [calibrationPresets, setCalibrationPresets] = useState<CalibrationPreset[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<MatchRecord | null>(null);
   const [watchbot, setWatchbot] = useState<WatchbotState | null>(null);
@@ -192,6 +200,8 @@ export default function UnifiedMatchConsole() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [watchbotUrl, setWatchbotUrl] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [selectedCalibrationPresetId, setSelectedCalibrationPresetId] = useState<string>("");
+  const [calibrateBeforeProcessing, setCalibrateBeforeProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -269,13 +279,15 @@ export default function UnifiedMatchConsole() {
   }, []);
 
   const refreshDashboard = useCallback(async (preferredMatchId?: string | null) => {
-    const [jobItems, matchItems, watchbotState] = await Promise.all([
+    const [jobItems, matchItems, presetItems, watchbotState] = await Promise.all([
       fetchJobs(),
       fetchMatches(),
+      fetchCalibrationPresets(),
       fetchWatchbot().then((response) => response.watchbot),
     ]);
     setJobs(jobItems);
     setMatches(matchItems);
+    setCalibrationPresets(presetItems);
     setWatchbot(watchbotState);
 
     const availableMatchIds = new Set(matchItems.map((match) => match.id));
@@ -567,11 +579,6 @@ export default function UnifiedMatchConsole() {
     return usableTracks.filter((track) => trackIds.includes(track.track_id));
   }, [heatmapTeam, selectedMatch, usableTracks]);
 
-  const activeMapViews = useMemo(
-    () => VIEW_ORDER.filter((view) => visibleMapViews[view]),
-    [visibleMapViews],
-  );
-
   const visibleDetections = useMemo(() => {
     if (!selectedMatch) return [];
     const grouped = new Map<string, { time: number; detections: typeof selectedMatch.detections }>();
@@ -804,12 +811,25 @@ export default function UnifiedMatchConsole() {
       if (pendingFile) formData.set("file", pendingFile);
       if (youtubeUrl.trim()) formData.set("youtube_url", youtubeUrl.trim());
       if (matchName.trim()) formData.set("match_name", matchName.trim());
+      if (selectedCalibrationPresetId) formData.set("calibration_preset_id", selectedCalibrationPresetId);
+      if (calibrateBeforeProcessing) formData.set("calibrate_first", "true");
       const response = await createSourceJob(formData);
       setVideoError(null);
+      if (response.match) {
+        setStatusMessage(`Created calibration draft ${response.match.id}.`);
+        await refreshDashboard(response.match.id);
+        router.push(`/calibrate?match=${response.match.id}`);
+        return;
+      }
+      if (!response.job) {
+        throw new Error("Backend did not return a job or match draft.");
+      }
       setStatusMessage(`Queued job ${response.job.id}`);
       setPendingFile(null);
       setYoutubeUrl("");
       setMatchName("");
+      setSelectedCalibrationPresetId("");
+      setCalibrateBeforeProcessing(false);
       await refreshDashboard(response.job.match_id ?? undefined);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to queue source.");
@@ -1095,6 +1115,23 @@ export default function UnifiedMatchConsole() {
               <form className="mt-4 space-y-4" onSubmit={handleSourceSubmit}>
                 <input value={matchName} onChange={(event) => setMatchName(event.target.value)} placeholder="Optional match name" className="w-full border-b border-white/15 bg-transparent px-1 py-3 text-sm outline-none placeholder:text-white/35" />
                 <input value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} placeholder="YouTube URL" className="w-full border-b border-white/15 bg-transparent px-1 py-3 text-sm outline-none placeholder:text-white/35" />
+                <div className="space-y-2">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">Calibration Preset</p>
+                  <div className="relative">
+                    <select value={selectedCalibrationPresetId} onChange={(event) => setSelectedCalibrationPresetId(event.target.value)} className={`w-full ${SELECT_CLASS}`}>
+                      <option value="">Default calibration</option>
+                      {calibrationPresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/50">⌄</span>
+                  </div>
+                  <p className="text-xs text-white/45">Pick a saved calibration before processing so the match only runs once.</p>
+                </div>
+                <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75">
+                  <span>Calibrate this match before processing</span>
+                  <input type="checkbox" checked={calibrateBeforeProcessing} onChange={(event) => setCalibrateBeforeProcessing(event.target.checked)} className="h-4 w-4 accent-emerald-300" />
+                </label>
                 <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-dashed border-white/15 bg-white/5 px-4 py-4 text-sm text-white/70 hover:border-emerald-300/35 hover:bg-white/8">
                   <span>{pendingFile ? pendingFile.name : "Choose local match video"}</span>
                   <span className="rounded-full bg-white/10 px-3 py-1 text-xs">Browse</span>

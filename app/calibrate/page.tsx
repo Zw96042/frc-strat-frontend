@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { fetchCalibration, fetchMatch, resolveArtifactUrl, updateCalibration } from "@/lib/api";
+import { createCalibrationPreset, fetchCalibration, fetchMatch, resolveArtifactUrl, startMatchProcessing, updateCalibration } from "@/lib/api";
 import { canvasPointToField, drawFieldBackground, FIELD_HEIGHT, FIELD_IMAGE_SRC, FIELD_WIDTH, fieldPointToCanvas, getFieldCanvasLayout } from "@/lib/fieldGeometry";
 import { CalibrationEnvelope, MatchRecord, ViewCalibration } from "@/lib/types";
 
@@ -172,15 +172,42 @@ function projectImagePoint(point: [number, number], homography: number[][]): [nu
   return [projectedX, projectedY];
 }
 
+function orderQuadIndices(points: [number, number][], invertY = false): number[] {
+  if (points.length !== 4) return points.map((_, index) => index);
+
+  const prepared = points.map(([x, y]) => [x, invertY ? -y : y] as const);
+  const sums = prepared.map(([x, y]) => x + y);
+  const diffs = prepared.map(([x, y]) => x - y);
+
+  const topLeft = sums.indexOf(Math.min(...sums));
+  const bottomRight = sums.indexOf(Math.max(...sums));
+  const topRight = diffs.indexOf(Math.max(...diffs));
+  const bottomLeft = diffs.indexOf(Math.min(...diffs));
+
+  const order = [topLeft, topRight, bottomLeft, bottomRight];
+  const uniqueOrder = [...new Set(order)];
+  for (let index = 0; index < points.length; index += 1) {
+    if (!uniqueOrder.includes(index)) uniqueOrder.push(index);
+  }
+  return uniqueOrder.slice(0, 4);
+}
+
+function orderQuadPoints(points: [number, number][], invertY = false): [number, number][] {
+  return orderQuadIndices(points, invertY).map((index) => points[index]);
+}
+
 function solveHomography(imagePoints: [number, number][], fieldPoints: [number, number][]): { homography: number[][]; error: number } | null {
   if (imagePoints.length < 4 || fieldPoints.length < 4) return null;
+  const order = orderQuadIndices(imagePoints);
+  const orderedImagePoints = order.map((index) => imagePoints[index]);
+  const orderedFieldPoints = order.map((index) => fieldPoints[index]);
 
   const matrix: number[][] = [];
   const vector: number[] = [];
 
   for (let index = 0; index < 4; index += 1) {
-    const [x, y] = imagePoints[index];
-    const [u, v] = fieldPoints[index];
+    const [x, y] = orderedImagePoints[index];
+    const [u, v] = orderedFieldPoints[index];
 
     matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
     vector.push(u);
@@ -199,9 +226,9 @@ function solveHomography(imagePoints: [number, number][], fieldPoints: [number, 
 
   let totalError = 0;
   for (let index = 0; index < 4; index += 1) {
-    const projected = projectImagePoint(imagePoints[index], homography);
+    const projected = projectImagePoint(orderedImagePoints[index], homography);
     if (!projected) return null;
-    totalError += Math.hypot(projected[0] - fieldPoints[index][0], projected[1] - fieldPoints[index][1]);
+    totalError += Math.hypot(projected[0] - orderedFieldPoints[index][0], projected[1] - orderedFieldPoints[index][1]);
   }
 
   return {
@@ -279,30 +306,75 @@ function projectFieldPointToImage(fieldPoint: [number, number], homography: numb
   return [correctedOrigin[0] + px / pw, correctedOrigin[1] + py / pw];
 }
 
-function sampleFieldLine(
+function clipLineSegmentToCanvas(
+  start: [number, number],
+  end: [number, number],
+  canvasWidth: number,
+  canvasHeight: number,
+): [[number, number], [number, number]] | null {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+
+  const clipTest = (p: number, q: number) => {
+    if (Math.abs(p) < 1e-9) return q >= 0;
+    const ratio = q / p;
+    if (p < 0) {
+      if (ratio > t1) return false;
+      if (ratio > t0) t0 = ratio;
+      return true;
+    }
+    if (ratio < t0) return false;
+    if (ratio < t1) t1 = ratio;
+    return true;
+  };
+
+  if (
+    !clipTest(-dx, start[0]) ||
+    !clipTest(dx, canvasWidth - start[0]) ||
+    !clipTest(-dy, start[1]) ||
+    !clipTest(dy, canvasHeight - start[1])
+  ) {
+    return null;
+  }
+
+  return [
+    [start[0] + t0 * dx, start[1] + t0 * dy],
+    [start[0] + t1 * dx, start[1] + t1 * dy],
+  ];
+}
+
+function projectFieldLineSegment(
   start: [number, number],
   end: [number, number],
   homography: number[][],
   roi: number[],
+  toCanvasPoint: (point: [number, number]) => [number, number],
+  canvasWidth: number,
+  canvasHeight: number,
   distortionX = 0,
   distortionY = 0,
-  segments = 24,
-): [number, number][] {
-  const points: [number, number][] = [];
-  for (let index = 0; index <= segments; index += 1) {
-    const t = index / segments;
-    const fieldPoint: [number, number] = [
-      start[0] + (end[0] - start[0]) * t,
-      start[1] + (end[1] - start[1]) * t,
-    ];
-    const projected = projectFieldPointToImage(fieldPoint, homography, roi, distortionX, distortionY);
-    if (projected) points.push(projected);
-  }
-  return points;
+): [number, number][] | null {
+  const projectedStart = projectFieldPointToImage(start, homography, roi, distortionX, distortionY);
+  const projectedEnd = projectFieldPointToImage(end, homography, roi, distortionX, distortionY);
+  if (!projectedStart || !projectedEnd) return null;
+
+  const clipped = clipLineSegmentToCanvas(
+    toCanvasPoint(projectedStart),
+    toCanvasPoint(projectedEnd),
+    canvasWidth,
+    canvasHeight,
+  );
+  return clipped ? [clipped[0], clipped[1]] : null;
 }
 
-function getCalibrationOverlayFieldLines() {
+function getCalibrationOverlayFieldLines(view: ViewCalibration) {
+  const firstFour = view.landmarks
+    .slice(0, 4)
+    .map((landmark) => [landmark.field_point[0], landmark.field_point[1]] as [number, number]);
   return {
+    label: "Projected field perimeter",
     perimeterCorners: [
       [-FIELD_WIDTH / 2, FIELD_HEIGHT / 2],
       [FIELD_WIDTH / 2, FIELD_HEIGHT / 2],
@@ -317,41 +389,13 @@ function getCalibrationOverlayFieldLines() {
       [-FIELD_WIDTH / 2, 0],
       [FIELD_WIDTH / 2, 0],
     ] as [[number, number], [number, number]],
+    calibrationZoneCorners: firstFour.length === 4
+      ? (() => {
+          const [topLeft, topRight, bottomLeft, bottomRight] = orderQuadPoints(firstFour, true);
+          return [topLeft, topRight, bottomRight, bottomLeft] as [number, number][];
+        })()
+      : null,
   };
-}
-
-function splitProjectedLine(points: [number, number][], canvasWidth: number, canvasHeight: number): [number, number][][] {
-  if (points.length < 2) return points.length ? [points] : [];
-
-  const maxJump = Math.max(canvasWidth, canvasHeight) * 0.35;
-  const maxCoordinate = Math.max(canvasWidth, canvasHeight) * 4;
-  const segments: [number, number][][] = [];
-  let current: [number, number][] = [];
-
-  for (const point of points) {
-    const [x, y] = point;
-    const finite = Number.isFinite(x) && Number.isFinite(y) && Math.abs(x) <= maxCoordinate && Math.abs(y) <= maxCoordinate;
-    if (!finite) {
-      if (current.length >= 2) segments.push(current);
-      current = [];
-      continue;
-    }
-
-    const previous = current[current.length - 1];
-    if (previous) {
-      const jump = Math.hypot(x - previous[0], y - previous[1]);
-      if (jump > maxJump) {
-        if (current.length >= 2) segments.push(current);
-        current = [point];
-        continue;
-      }
-    }
-
-    current.push(point);
-  }
-
-  if (current.length >= 2) segments.push(current);
-  return segments;
 }
 
 function cloneCalibration(calibration: CalibrationEnvelope): CalibrationEnvelope {
@@ -676,6 +720,17 @@ function CalibratePageContent() {
 
       const scaleX = mediaRect.width / image.width;
       const scaleY = mediaRect.height / image.height;
+      const overlayScale = Math.max(Math.min((scaleX + scaleY) / 2, 3), 0.35);
+      const roiStrokeWidth = Math.max(1.5, 3 * overlayScale);
+      const landmarkRadius = Math.max(5, 12 * overlayScale);
+      const landmarkStrokeWidth = Math.max(1.25, 2 * overlayScale);
+      const landmarkFontSize = Math.max(10, 14 * overlayScale);
+      const fieldLineWidth = Math.max(1.25, 2 * overlayScale);
+      const guideDashOn = Math.max(6, 10 * overlayScale);
+      const guideDashOff = Math.max(5, 8 * overlayScale);
+      const labelFontSize = Math.max(11, 16 * overlayScale);
+      const labelOffset = Math.max(6, 8 * overlayScale);
+      const bboxAnchorRadius = Math.max(4, 8 * overlayScale);
       const toCanvasPoint = ([x, y]: [number, number]): [number, number] => [
         mediaRect.left + x * scaleX,
         mediaRect.top + y * scaleY,
@@ -688,7 +743,7 @@ function CalibratePageContent() {
         const bottomRight = toCanvasPoint(undistortPoint([x2, y2], currentViewCalibration.roi, distortionX, distortionY));
         const bottomLeft = toCanvasPoint(undistortPoint([x1, y2], currentViewCalibration.roi, distortionX, distortionY));
         context.strokeStyle = "#00ffa6";
-        context.lineWidth = 3;
+        context.lineWidth = roiStrokeWidth;
         context.beginPath();
         context.moveTo(topLeft[0], topLeft[1]);
         context.lineTo(topRight[0], topRight[1]);
@@ -702,41 +757,47 @@ function CalibratePageContent() {
         const [x, y] = toCanvasPoint(undistortPoint([landmark.image_point[0], landmark.image_point[1]], currentViewCalibration.roi, distortionX, distortionY));
         if (x === 0 && y === 0) return;
         context.beginPath();
-        context.arc(x, y, 12, 0, Math.PI * 2);
+        context.arc(x, y, landmarkRadius, 0, Math.PI * 2);
         context.fillStyle = LANDMARK_COLORS[index % LANDMARK_COLORS.length];
         context.fill();
         context.strokeStyle = "#ffffff";
-        context.lineWidth = 2;
+        context.lineWidth = landmarkStrokeWidth;
         context.stroke();
         context.fillStyle = "#061217";
-        context.font = "bold 14px sans-serif";
+        context.font = `bold ${landmarkFontSize}px sans-serif`;
         context.textAlign = "center";
         context.textBaseline = "middle";
         context.fillText(String(index + 1), x, y);
       });
 
-      const overlayLines = getCalibrationOverlayFieldLines();
+      const overlayLines = getCalibrationOverlayFieldLines(currentViewCalibration);
       const edgeSegments = overlayLines
         ? [
-            sampleFieldLine(overlayLines.perimeterCorners[0], overlayLines.perimeterCorners[1], currentViewCalibration.homography, currentViewCalibration.roi, distortionX, distortionY),
-            sampleFieldLine(overlayLines.perimeterCorners[1], overlayLines.perimeterCorners[2], currentViewCalibration.homography, currentViewCalibration.roi, distortionX, distortionY),
-            sampleFieldLine(overlayLines.perimeterCorners[2], overlayLines.perimeterCorners[3], currentViewCalibration.homography, currentViewCalibration.roi, distortionX, distortionY),
-            sampleFieldLine(overlayLines.perimeterCorners[3], overlayLines.perimeterCorners[0], currentViewCalibration.homography, currentViewCalibration.roi, distortionX, distortionY),
-          ].map((edge) => edge.map((point) => toCanvasPoint(point)))
-            .flatMap((edge) => splitProjectedLine(edge, canvas.width, canvas.height))
+            projectFieldLineSegment(overlayLines.perimeterCorners[0], overlayLines.perimeterCorners[1], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+            projectFieldLineSegment(overlayLines.perimeterCorners[1], overlayLines.perimeterCorners[2], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+            projectFieldLineSegment(overlayLines.perimeterCorners[2], overlayLines.perimeterCorners[3], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+            projectFieldLineSegment(overlayLines.perimeterCorners[3], overlayLines.perimeterCorners[0], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+          ].filter((edge): edge is [number, number][] => edge !== null)
         : [];
       const guideSegments = overlayLines
         ? [
-            sampleFieldLine(overlayLines.verticalGuide[0], overlayLines.verticalGuide[1], currentViewCalibration.homography, currentViewCalibration.roi, distortionX, distortionY),
-            sampleFieldLine(overlayLines.horizontalGuide[0], overlayLines.horizontalGuide[1], currentViewCalibration.homography, currentViewCalibration.roi, distortionX, distortionY),
-          ].map((guide) => guide.map((point) => toCanvasPoint(point)))
-            .flatMap((guide) => splitProjectedLine(guide, canvas.width, canvas.height))
+            projectFieldLineSegment(overlayLines.verticalGuide[0], overlayLines.verticalGuide[1], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+            projectFieldLineSegment(overlayLines.horizontalGuide[0], overlayLines.horizontalGuide[1], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+          ].filter((guide): guide is [number, number][] => guide !== null)
+        : [];
+      const calibrationZoneSegments = overlayLines?.calibrationZoneCorners
+        ? [
+            projectFieldLineSegment(overlayLines.calibrationZoneCorners[0], overlayLines.calibrationZoneCorners[1], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+            projectFieldLineSegment(overlayLines.calibrationZoneCorners[1], overlayLines.calibrationZoneCorners[2], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+            projectFieldLineSegment(overlayLines.calibrationZoneCorners[2], overlayLines.calibrationZoneCorners[3], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+            projectFieldLineSegment(overlayLines.calibrationZoneCorners[3], overlayLines.calibrationZoneCorners[0], currentViewCalibration.homography, currentViewCalibration.roi, toCanvasPoint, canvas.width, canvas.height, distortionX, distortionY),
+          ].filter((segment): segment is [number, number][] => segment !== null)
         : [];
 
       if (edgeSegments.length > 0) {
         context.save();
         context.strokeStyle = "rgba(0, 255, 166, 0.9)";
-        context.lineWidth = 2;
+        context.lineWidth = fieldLineWidth;
 
         for (const edge of edgeSegments) {
           context.beginPath();
@@ -747,7 +808,8 @@ function CalibratePageContent() {
           context.stroke();
         }
 
-        context.setLineDash([10, 8]);
+        context.setLineDash([guideDashOn, guideDashOff]);
+        context.strokeStyle = "rgba(0, 255, 166, 0.75)";
         for (const guide of guideSegments) {
           context.beginPath();
           guide.forEach(([x, y], index) => {
@@ -756,21 +818,35 @@ function CalibratePageContent() {
           });
           context.stroke();
         }
+        context.strokeStyle = "rgba(250, 204, 21, 0.9)";
+        for (const zone of calibrationZoneSegments) {
+          context.beginPath();
+          zone.forEach(([x, y], index) => {
+            if (index === 0) context.moveTo(x, y);
+            else context.lineTo(x, y);
+          });
+          context.stroke();
+        }
         context.setLineDash([]);
 
         context.fillStyle = "#00ffa6";
-        context.font = "bold 16px sans-serif";
+        context.font = `bold ${labelFontSize}px sans-serif`;
         context.textAlign = "left";
         context.textBaseline = "top";
         const labelAnchor = edgeSegments[0][0];
-        context.fillText("Projected field perimeter", labelAnchor[0] + 8, labelAnchor[1] + 8);
+        context.fillText(overlayLines.label, labelAnchor[0] + labelOffset, labelAnchor[1] + labelOffset);
+        if (calibrationZoneSegments.length > 0) {
+          context.fillStyle = "#facc15";
+          const zoneAnchor = calibrationZoneSegments[0][0];
+          context.fillText("Landmark quad", zoneAnchor[0] + labelOffset, zoneAnchor[1] + labelOffset);
+        }
         context.restore();
       }
 
       if (bboxStart) {
         const [x, y] = toCanvasPoint(bboxStart);
         context.beginPath();
-        context.arc(x, y, 8, 0, Math.PI * 2);
+        context.arc(x, y, bboxAnchorRadius, 0, Math.PI * 2);
         context.fillStyle = "#ffffff";
         context.fill();
       }
@@ -943,9 +1019,34 @@ function CalibratePageContent() {
     try {
       const updated = await updateCalibration(matchId, calibration);
       setCalibration(updated);
-      setStatusMessage("Calibration saved to backend.");
+      setStatusMessage("Calibration saved to this match. New jobs can use a saved preset before processing.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to save calibration.");
+    }
+  }
+
+  async function handleSavePreset() {
+    if (!calibration) return;
+    const suggestedName = `${match?.metadata?.display_name ?? "Match"} calibration`;
+    const name = window.prompt("Preset name", suggestedName);
+    if (!name || !name.trim()) return;
+
+    try {
+      await createCalibrationPreset(name.trim(), calibration);
+      setStatusMessage(`Saved calibration preset "${name.trim()}".`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to save calibration preset.");
+    }
+  }
+
+  async function handleStartProcessing() {
+    if (!calibration || !matchId) return;
+    try {
+      await updateCalibration(matchId, calibration);
+      await startMatchProcessing(matchId);
+      setStatusMessage("Calibration saved and processing started.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to start processing.");
     }
   }
 
@@ -964,8 +1065,14 @@ function CalibratePageContent() {
             <Link href="/" className="rounded-full border border-white/15 bg-white/8 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/14">
               Back to Console
             </Link>
+            <button onClick={handleSavePreset} disabled={!calibration} className="rounded-full border border-sky-300/30 bg-sky-300/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-300/18 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/10 disabled:text-white/40">
+              Save As Preset
+            </button>
             <button onClick={handleSave} disabled={!calibration} className="rounded-full bg-sky-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-white/15 disabled:text-white/40">
               Save Calibration
+            </button>
+            <button onClick={handleStartProcessing} disabled={!calibration || match?.metadata?.status === "processing"} className="rounded-full bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:bg-white/15 disabled:text-white/40">
+              Save + Start Processing
             </button>
           </div>
         </div>
