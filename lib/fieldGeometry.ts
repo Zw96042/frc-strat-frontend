@@ -1,8 +1,19 @@
 export const FIELD_WIDTH = 651.25;
 export const FIELD_HEIGHT = 323.25;
 export const FIELD_IMAGE_SRC = "/2026_No-Fuel_Transparent.png";
-export const FIELD_IMAGE_SCALE_X = 1.365;
-export const FIELD_IMAGE_SCALE_Y = 1.125;
+/**
+ * Normalized field extents within the full bitmap. These match the fuel processor's
+ * projection bounds, so calibration, robot rendering, and fuel overlays all align.
+ */
+export const FIELD_IMAGE_NORM_BOUNDS = {
+  minX: 0.133,
+  maxX: 0.866,
+  minY: 0.053,
+  maxY: 0.946,
+} as const;
+
+export const FIELD_IMAGE_SCALE_X = 1 / (FIELD_IMAGE_NORM_BOUNDS.maxX - FIELD_IMAGE_NORM_BOUNDS.minX);
+export const FIELD_IMAGE_SCALE_Y = 1 / (FIELD_IMAGE_NORM_BOUNDS.maxY - FIELD_IMAGE_NORM_BOUNDS.minY);
 
 export interface FieldCanvasLayout {
   scale: number;
@@ -28,8 +39,8 @@ export function getFieldCanvasLayout(canvasWidth: number, canvasHeight: number, 
   const frameTop = (canvasHeight - frameHeight) / 2;
   const imageWidth = frameWidth * FIELD_IMAGE_SCALE_X;
   const imageHeight = frameHeight * FIELD_IMAGE_SCALE_Y;
-  const imageLeft = frameLeft + (frameWidth - imageWidth) / 2;
-  const imageTop = frameTop + (frameHeight - imageHeight) / 2;
+  const imageLeft = frameLeft - FIELD_IMAGE_NORM_BOUNDS.minX * imageWidth;
+  const imageTop = frameTop - FIELD_IMAGE_NORM_BOUNDS.minY * imageHeight;
 
   return {
     scale,

@@ -87,6 +87,48 @@ export interface MatchArtifacts {
   debug_snapshot?: string | null;
 }
 
+export interface FuelCalibration {
+  ground_quad?: number[][] | null;
+  left_wall_quad?: number[][] | null;
+  right_wall_quad?: number[][] | null;
+  fuel_base_color: number[];
+  updated_at?: number | null;
+}
+
+export interface FuelArtifactSet {
+  overlay_image?: string | null;
+  overlay_transparent_image?: string | null;
+  overlay_video?: string | null;
+  raw_data?: string | null;
+  field_map?: string | null;
+  air_profile?: string | null;
+  stats_file?: string | null;
+  process_log?: string | null;
+}
+
+export interface FuelProcessingProgress {
+  phase: string;
+  current: number;
+  total: number;
+  started_at: number;
+  updated_at: number;
+}
+
+export interface FuelAnalysisRecord {
+  status: "idle" | "ready" | "processing" | "completed" | "error";
+  artifacts: FuelArtifactSet;
+  stats: Record<string, unknown>;
+  last_error?: string | null;
+  processing_progress?: FuelProcessingProgress | null;
+  updated_at?: number | null;
+}
+
+export interface FuelStateResponse {
+  match_id: string;
+  fuel_calibration: FuelCalibration;
+  fuel_analysis: FuelAnalysisRecord;
+}
+
 export interface MatchSummary {
   id: string;
   created_at: number;
@@ -106,6 +148,8 @@ export interface MatchRecord {
   detections: DetectionRecord[];
   tracks: TrackRecord[];
   artifacts: MatchArtifacts;
+  fuel_calibration?: FuelCalibration;
+  fuel_analysis?: FuelAnalysisRecord;
   labels: Record<string, string>;
   debug: Record<string, unknown>;
 }
@@ -127,4 +171,24 @@ export interface TbaMatch {
   set_number?: number | null;
   alliances?: Record<string, unknown>;
   videos?: Array<Record<string, unknown>>;
+}
+
+/** Fuel processor `field-map.json` (see fuel-density-map processor export). */
+export type FieldMapPoint = [number, number, number];
+
+export interface FieldMapData {
+  imageWidth: number;
+  imageHeight: number;
+  fps: number;
+  frameCount: number;
+  frames: FieldMapPoint[][];
+}
+
+export type AirProfilePoint = [number, number];
+
+export interface AirProfileData {
+  fps: number;
+  frameCount: number;
+  wallSide?: "top" | "bottom" | "left" | "right" | "mixed";
+  frames: AirProfilePoint[][];
 }

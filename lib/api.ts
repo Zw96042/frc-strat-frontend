@@ -1,5 +1,8 @@
 import {
   CalibrationEnvelope,
+  FuelCalibration,
+  FuelAnalysisRecord,
+  FuelStateResponse,
   JobRecord,
   MatchRecord,
   MatchSummary,
@@ -37,8 +40,33 @@ export class ApiError extends Error {
   }
 }
 
+function fuelEndpointMessage(action: string): string {
+  return `Fuel ${action} is unavailable on the current backend. Restart the frc-strat backend so the new fuel API routes are loaded.`;
+}
+
 function buildUrl(path: string): string {
   return `${getApiBase()}${path}`;
+}
+
+function defaultFuelCalibration(match?: MatchRecord): FuelCalibration {
+  return {
+    ground_quad: match?.fuel_calibration?.ground_quad ?? null,
+    left_wall_quad: match?.fuel_calibration?.left_wall_quad ?? null,
+    right_wall_quad: match?.fuel_calibration?.right_wall_quad ?? null,
+    fuel_base_color: match?.fuel_calibration?.fuel_base_color ?? [255, 255, 0],
+    updated_at: match?.fuel_calibration?.updated_at ?? null,
+  };
+}
+
+function defaultFuelAnalysis(match?: MatchRecord): FuelAnalysisRecord {
+  return {
+    status: match?.fuel_analysis?.status ?? ((match?.fuel_calibration?.ground_quad?.length ?? 0) === 4 ? "ready" : "idle"),
+    artifacts: match?.fuel_analysis?.artifacts ?? {},
+    stats: match?.fuel_analysis?.stats ?? {},
+    last_error: match?.fuel_analysis?.last_error ?? null,
+    processing_progress: match?.fuel_analysis?.processing_progress ?? null,
+    updated_at: match?.fuel_analysis?.updated_at ?? null,
+  };
 }
 
 async function handleJson<T>(response: Response): Promise<T> {
@@ -159,6 +187,97 @@ export async function updateCalibration(matchId: string, calibration: Calibratio
       body: JSON.stringify(calibration),
     }),
   );
+}
+
+export async function fetchFuelState(matchId: string): Promise<FuelStateResponse> {
+  try {
+    return await handleJson<FuelStateResponse>(await fetch(buildUrl(`/matches/${matchId}/fuel`), { cache: "no-store" }));
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
+
+    const match = await fetchMatch(matchId);
+    return {
+      match_id: match.id,
+      fuel_calibration: defaultFuelCalibration(match),
+      fuel_analysis: defaultFuelAnalysis(match),
+    };
+  }
+}
+
+export async function updateFuelCalibration(
+  matchId: string,
+  calibration: Partial<FuelCalibration>,
+): Promise<FuelCalibration> {
+  try {
+    return await handleJson<FuelCalibration>(
+      await fetch(buildUrl(`/matches/${matchId}/fuel-calibration`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(calibration),
+      }),
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ApiError(fuelEndpointMessage("saving"), 404);
+    }
+    throw error;
+  }
+}
+
+export async function updateFuelBaseColor(matchId: string, fuelBaseColor: number[]): Promise<FuelStateResponse | { fuel_base_color: number[]; fuel_calibration: FuelCalibration }> {
+  try {
+    return await handleJson<FuelStateResponse | { fuel_base_color: number[]; fuel_calibration: FuelCalibration }>(
+      await fetch(buildUrl(`/matches/${matchId}/fuel/base-color`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fuel_base_color: fuelBaseColor }),
+      }),
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ApiError(fuelEndpointMessage("color updates"), 404);
+    }
+    throw error;
+  }
+}
+
+export async function sampleFuelBaseColor(
+  matchId: string,
+  x: number,
+  y: number,
+  timeSec: number,
+): Promise<{ fuel_base_color: number[]; fuel_calibration: FuelCalibration }> {
+  try {
+    return await handleJson<{ fuel_base_color: number[]; fuel_calibration: FuelCalibration }>(
+      await fetch(buildUrl(`/matches/${matchId}/fuel/base-color/sample`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x, y, time_sec: timeSec }),
+      }),
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ApiError(fuelEndpointMessage("color sampling"), 404);
+    }
+    throw error;
+  }
+}
+
+export async function processFuel(matchId: string): Promise<FuelStateResponse> {
+  try {
+    return await handleJson<FuelStateResponse>(
+      await fetch(buildUrl(`/matches/${matchId}/fuel/process`), {
+        method: "POST",
+      }),
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ApiError(fuelEndpointMessage("processing"), 404);
+    }
+    throw error;
+  }
 }
 
 export async function fetchTeamSchedule(teamKey: string, year: number): Promise<{ team_key: string; year: number; matches: TbaMatch[] }> {

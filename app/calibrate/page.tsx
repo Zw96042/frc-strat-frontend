@@ -301,14 +301,7 @@ function sampleFieldLine(
   return points;
 }
 
-function midpoint(a: [number, number], b: [number, number]): [number, number] {
-  return [
-    (a[0] + b[0]) / 2,
-    (a[1] + b[1]) / 2,
-  ];
-}
-
-function getCalibrationOverlayFieldLines(view: ViewCalibration) {
+function getCalibrationOverlayFieldLines() {
   return {
     perimeterCorners: [
       [-FIELD_WIDTH / 2, FIELD_HEIGHT / 2],
@@ -722,7 +715,7 @@ function CalibratePageContent() {
         context.fillText(String(index + 1), x, y);
       });
 
-      const overlayLines = getCalibrationOverlayFieldLines(currentViewCalibration);
+      const overlayLines = getCalibrationOverlayFieldLines();
       const edgeSegments = overlayLines
         ? [
             sampleFieldLine(overlayLines.perimeterCorners[0], overlayLines.perimeterCorners[1], currentViewCalibration.homography, currentViewCalibration.roi, distortionX, distortionY),

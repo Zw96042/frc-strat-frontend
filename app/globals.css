@@ -41,3 +41,757 @@ option {
   background-color: #0d1620;
   color: #f8fafc;
 }
+
+/* —— IDE / VS Code–inspired workbench (Match desk) —— */
+.desk-root {
+  --desk-bg: #0c0c0c;
+  --desk-bg-elevated: #141414;
+  --desk-bg-surface: #1a1a1a;
+  --desk-bg-hover: rgba(255, 255, 255, 0.04);
+  --desk-border: rgba(255, 255, 255, 0.07);
+  --desk-border-strong: rgba(255, 255, 255, 0.11);
+  --desk-text: #e8e8e8;
+  --desk-text-muted: #9d9d9d;
+  --desk-text-faint: #6b6b6b;
+  --desk-accent: #3b8eea;
+  --desk-accent-muted: rgba(59, 142, 234, 0.16);
+  --desk-success: #3fb950;
+  --desk-warn: #d29922;
+  --desk-warn-border: rgba(210, 153, 34, 0.35);
+  --desk-warn-bg: rgba(210, 153, 34, 0.1);
+  --desk-warn-text: #ffd89a;
+  --desk-danger: #f85149;
+  --desk-rail-width: 48px;
+  --desk-sidebar-width: min(300px, 32vw);
+  --desk-titlebar-height: 40px;
+
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--desk-bg);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+  font-family: var(--font-desk-sans), var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Lock workbench (and similar) to the viewport — scroll lives inside panels, not the page */
+.desk-root--viewport-lock {
+  min-height: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.desk-titlebar {
+  height: var(--desk-titlebar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px 0 calc(var(--desk-rail-width) + 8px);
+  border-bottom: 1px solid var(--desk-border);
+  background: var(--desk-bg-elevated);
+}
+
+.desk-titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.desk-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--desk-accent) 0%, #1e4d8f 100%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.desk-kicker {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--desk-text-faint);
+}
+
+.desk-titlebar-title {
+  margin: 0;
+  font-size: 13px;
+  max-width: min(48vw, 420px);
+}
+
+.desk-titlebar-center {
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.desk-titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.desk-toast {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(248, 81, 73, 0.28);
+  background: rgba(248, 81, 73, 0.08);
+  color: #ffb4b0;
+  font-size: 12px;
+}
+
+.desk-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+
+.desk-rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--desk-rail-width);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-right: 1px solid var(--desk-border);
+  background: var(--desk-bg);
+}
+
+.desk-rail-spacer {
+  height: 28px;
+}
+
+.desk-rail-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--desk-text-muted);
+  background: var(--desk-bg-surface);
+  border: 1px solid var(--desk-border);
+}
+
+.desk-rail-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg-surface);
+  color: var(--desk-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.desk-rail-toggle:hover {
+  color: var(--desk-text);
+  border-color: var(--desk-border-strong);
+  background: var(--desk-bg-hover);
+}
+
+.desk-sidebar {
+  width: var(--desk-sidebar-width);
+  flex-shrink: 0;
+  margin-left: var(--desk-rail-width);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--desk-border);
+  background: var(--desk-bg-elevated);
+  transition: width 0.22s ease, border-color 0.22s ease, opacity 0.18s ease;
+}
+
+.desk-sidebar--collapsed {
+  width: 0 !important;
+  margin-left: var(--desk-rail-width);
+  border-right-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.desk-sidebar-inner {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.desk-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--desk-bg);
+}
+
+.desk-main-inner {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.desk-main-inner--workbench {
+  overflow: hidden;
+  padding: 10px 12px 12px;
+  gap: 12px;
+}
+
+.desk-main-workbench-primary {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 2 1 0;
+  overflow: hidden;
+  gap: 8px;
+}
+
+.desk-main-workbench-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.desk-main-inner--workbench .desk-stage-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.desk-main-inner--workbench .desk-stage-frame {
+  flex: 1;
+  min-height: 0;
+}
+
+.desk-section-label {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--desk-text-faint);
+}
+
+.desk-card {
+  border-radius: 8px;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg);
+  padding: 12px;
+}
+
+.desk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg-surface);
+  color: var(--desk-text);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.desk-btn:hover {
+  background: var(--desk-bg-hover);
+  border-color: var(--desk-border-strong);
+}
+
+.desk-btn--ghost {
+  background: transparent;
+}
+
+.desk-btn--accent {
+  border-color: rgba(59, 142, 234, 0.45);
+  background: var(--desk-accent-muted);
+  color: var(--desk-text);
+}
+
+.desk-btn--primary {
+  border-color: rgba(59, 142, 234, 0.5);
+  background: var(--desk-accent-muted);
+  color: var(--desk-text);
+}
+
+.desk-btn--primary:hover {
+  filter: brightness(1.06);
+}
+
+.desk-btn--danger {
+  border-color: rgba(248, 81, 73, 0.35);
+  color: #ffb4b0;
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.desk-stage-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--desk-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+}
+
+.desk-stage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--desk-border);
+  background: var(--desk-bg-elevated);
+}
+
+.desk-stage-frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Reference: fuel-density-map stage-media + field aspect */
+.desk-stage-media {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  background: #000;
+  overflow: hidden;
+}
+
+/* Match: grow in the column and enforce a minimum stage height. */
+.desk-stage-media--match {
+  flex: 1;
+  min-height: min(28dvh, 220px);
+}
+
+/*
+ * Field: do NOT flex-grow — otherwise the stage stretches tall, aspect-ratio is distorted,
+ * and the wide field bitmap looks “vertical” (excess letterboxing / wrong proportions).
+ *
+ * Override base min-height: 0 — with flex + aspect-ratio that combination can collapse
+ * the used height to 0, so the field canvas never appears.
+ */
+.desk-stage-media--field {
+  flex: 0 0 auto;
+  width: 100%;
+  /* aspect-ratio + flex min-height:0 ancestors can resolve to 0×0; drawCombinedFieldFrame then no-ops */
+  min-height: min(26dvh, 200px);
+  max-height: min(42dvh, 400px);
+  aspect-ratio: 3901 / 1583;
+}
+
+.desk-stage-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 1;
+}
+
+.desk-stage-video--offscreen {
+  opacity: 0 !important;
+  position: absolute !important;
+  width: 2px !important;
+  height: 2px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  left: 0 !important;
+  top: 0 !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+
+.desk-stage-field-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.desk-stage-field-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* Match / Field toggle (from reference mode-toggle) */
+.desk-mode-toggle {
+  position: relative;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg);
+}
+
+.desk-mode-toggle__glider {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 8px) / 2);
+  border-radius: 6px;
+  background: var(--desk-accent-muted);
+  box-shadow: 0 0 0 1px rgba(59, 142, 234, 0.25);
+  z-index: 0;
+  pointer-events: none;
+  transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.desk-mode-toggle--field .desk-mode-toggle__glider {
+  transform: translateX(calc(100% + 2px));
+}
+
+.desk-mode-toggle__segment {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 14px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--desk-text-faint);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.desk-mode-toggle__segment:hover {
+  color: var(--desk-text);
+}
+
+.desk-mode-toggle__segment[aria-pressed='true'] {
+  color: var(--desk-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desk-mode-toggle__glider {
+    transition: none;
+  }
+}
+
+.desk-transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--desk-border);
+  background: var(--desk-bg-elevated);
+}
+
+.desk-transport-play {
+  width: 40px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg-surface);
+  color: var(--desk-text);
+  cursor: pointer;
+}
+
+.desk-timeline {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.desk-timeline span {
+  font-family: var(--font-desk-mono), var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--desk-text-faint);
+  min-width: 38px;
+}
+
+.desk-timeline input[type="range"] {
+  flex: 1;
+  accent-color: var(--desk-accent);
+}
+
+.desk-select-compact {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg);
+  color: var(--desk-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.desk-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg);
+}
+
+.desk-segmented__btn {
+  padding: 0 12px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--desk-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.desk-segmented__btn:hover:not(:disabled) {
+  color: var(--desk-text);
+}
+
+.desk-segmented__btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.desk-segmented__btn--on {
+  background: var(--desk-accent-muted);
+  color: var(--desk-text);
+  box-shadow: 0 0 0 1px rgba(59, 142, 234, 0.25);
+}
+
+.desk-fusion-label {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--desk-text-faint);
+}
+
+.desk-fusion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  .desk-fusion-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.desk-fusion-cell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--desk-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--desk-bg-elevated);
+}
+
+.desk-fusion-cell--stack {
+  gap: 0;
+}
+
+.desk-fusion-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--desk-border);
+  background: var(--desk-bg-surface);
+}
+
+.desk-fusion-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--desk-text);
+}
+
+.desk-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--desk-border);
+  background: var(--desk-bg);
+  color: var(--desk-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.desk-chip--on {
+  border-color: rgba(59, 142, 234, 0.45);
+  background: var(--desk-accent-muted);
+  color: var(--desk-text);
+}
+
+.desk-canvas-frame {
+  position: relative;
+  min-height: 280px;
+  flex: 1;
+  background: #050608;
+}
+
+.desk-canvas-frame--dark {
+  background: #030304;
+}
+
+.desk-fusion-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--desk-border);
+  font-size: 11px;
+  color: var(--desk-text-muted);
+  font-family: var(--font-desk-mono), var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.desk-air-panel {
+  border-top: 1px solid var(--desk-border);
+  background: linear-gradient(180deg, rgba(18, 22, 30, 0.98) 0%, rgba(10, 12, 18, 0.98) 100%);
+}
+
+.desk-air-panel--below-stage {
+  border: 1px solid var(--desk-border);
+  border-radius: 10px;
+  overflow: hidden;
+  border-top: 1px solid var(--desk-border);
+}
+
+/* Compact air profile strip (no chrome labels) */
+.desk-air-panel--compact {
+  flex-shrink: 0;
+}
+
+.desk-air-panel--compact .desk-air-canvas-wrap {
+  position: relative;
+  height: 72px;
+  min-height: 72px;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.desk-air-panel--compact .desk-air-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.desk-air-body--wide {
+  min-height: 180px;
+}
+
+.desk-air-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.desk-air-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 110, 0.22);
+  background: rgba(255, 190, 110, 0.1);
+  color: #ffd89a;
+  flex-shrink: 0;
+}
+
+.desk-air-body {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  min-height: 160px;
+}
+
+.desk-air-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px 8px 14px 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--desk-text-faint);
+}
+
+.desk-inspector-col {
+  min-width: 0;
+  border-left: 1px solid var(--desk-border);
+  padding-left: 16px;
+}
+
+@media (max-width: 1279px) {
+  .desk-inspector-col {
+    border-left: 0;
+    padding-left: 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--desk-border);
+  }
+}
