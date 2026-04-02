@@ -1,6 +1,7 @@
 'use client';
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -10,6 +11,7 @@ import {
   deleteMatch,
   fetchJob,
   fetchJobs,
+  fetchCalibrationPresets,
   fetchMatch,
   fetchMatches,
   fetchTeamSchedule,
@@ -20,7 +22,7 @@ import {
   updateMatchLabels,
 } from "@/lib/api";
 import { drawFieldBackground, FIELD_HEIGHT, FIELD_IMAGE_SRC, FIELD_WIDTH, fieldPointToCanvas, getFieldCanvasLayout } from "@/lib/fieldGeometry";
-import { JobRecord, MatchRecord, MatchSummary, TbaMatch, TrackRecord, WatchbotState } from "@/lib/types";
+import { CalibrationPreset, JobRecord, MatchRecord, MatchSummary, TbaMatch, TrackRecord, WatchbotState } from "@/lib/types";
 
 const FIELD_MARGIN = 36;
 const TRACK_SNAPSHOT_TOLERANCE_SECONDS = 0.2;
@@ -46,6 +48,10 @@ function isTrackOnField(track: { x: number; y: number }) {
     track.y >= -(FIELD_HEIGHT / 2) - FIELD_MARGIN &&
     track.y <= (FIELD_HEIGHT / 2) + FIELD_MARGIN
   );
+}
+
+function isFusedTrack(track: TrackRecord) {
+  return new Set(track.source_views ?? []).size > 1;
 }
 
 function formatTime(seconds: number) {
@@ -152,7 +158,11 @@ function dedupeVisibleTracks(tracks: TrackRecord[]): TrackRecord[] {
   const deduped: TrackRecord[] = [];
   for (const track of preferred) {
     const existingIndex = deduped.findIndex((kept) => (
-      Math.hypot(track.x - kept.x, track.y - kept.y) <= TRACK_SWITCH_DEDUPE_DISTANCE_IN
+      kept.track_id === track.track_id || (
+        kept.tracking_source === "detection" &&
+        track.tracking_source === "detection" &&
+        Math.hypot(track.x - kept.x, track.y - kept.y) <= TRACK_SWITCH_DEDUPE_DISTANCE_IN
+      )
     ));
 
     if (existingIndex === -1) {
@@ -172,8 +182,10 @@ type VideoFrameSyncVideo = HTMLVideoElement & {
 };
 
 export default function Home() {
+  const router = useRouter();
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [matches, setMatches] = useState<MatchSummary[]>([]);
+  const [calibrationPresets, setCalibrationPresets] = useState<CalibrationPreset[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<MatchRecord | null>(null);
   const [watchbot, setWatchbot] = useState<WatchbotState | null>(null);
@@ -181,6 +193,8 @@ export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [watchbotUrl, setWatchbotUrl] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [selectedCalibrationPresetId, setSelectedCalibrationPresetId] = useState<string>("");
+  const [calibrateBeforeProcessing, setCalibrateBeforeProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -231,13 +245,15 @@ export default function Home() {
   }, []);
 
   const refreshDashboard = useCallback(async (preferredMatchId?: string | null) => {
-    const [jobItems, matchItems, watchbotState] = await Promise.all([
+    const [jobItems, matchItems, presetItems, watchbotState] = await Promise.all([
       fetchJobs(),
       fetchMatches(),
+      fetchCalibrationPresets(),
       fetchWatchbot().then((response) => response.watchbot),
     ]);
     setJobs(jobItems);
     setMatches(matchItems);
+    setCalibrationPresets(presetItems);
     setWatchbot(watchbotState);
 
     const availableMatchIds = new Set(matchItems.map((match) => match.id));
@@ -654,9 +670,15 @@ export default function Home() {
       const [x, y] = fieldPointToCanvas([track.x, track.y], layout);
       const label = selectedMatch?.labels[String(track.track_id)] ?? `T${track.track_id}`;
       const selected = selectedTrackId === track.track_id;
+      const fused = isFusedTrack(track);
 
-      context.fillStyle = selected ? "#f1f5f9" : "#cbd5e1";
-      context.strokeStyle = selected ? "#ffffff" : "#e2e8f0";
+      if (fused) {
+        context.fillStyle = selected ? "#f3e8ff" : "#c084fc";
+        context.strokeStyle = selected ? "#ffffff" : "#e9d5ff";
+      } else {
+        context.fillStyle = selected ? "#f1f5f9" : "#cbd5e1";
+        context.strokeStyle = selected ? "#ffffff" : "#e2e8f0";
+      }
       context.lineWidth = selected ? 4 : 2;
       context.beginPath();
       context.roundRect(x - 18, y - 18, 36, 36, 8);
@@ -668,6 +690,12 @@ export default function Home() {
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText(label.slice(0, 5), x, y);
+
+      if (fused) {
+        context.fillStyle = "#f3e8ff";
+        context.font = "bold 10px sans-serif";
+        context.fillText("FUSED", x, y + 28);
+      }
     });
   }, [currentTime, fieldImageVersion, selectedMatch, selectedTrackId, visibleDetections, visibleHeatmapTracks, visibleTrackHistory, visibleTracksOnMap]);
 
@@ -691,12 +719,25 @@ export default function Home() {
       if (pendingFile) formData.set("file", pendingFile);
       if (youtubeUrl.trim()) formData.set("youtube_url", youtubeUrl.trim());
       if (matchName.trim()) formData.set("match_name", matchName.trim());
+      if (selectedCalibrationPresetId) formData.set("calibration_preset_id", selectedCalibrationPresetId);
+      if (calibrateBeforeProcessing) formData.set("calibrate_first", "true");
       const response = await createSourceJob(formData);
       setVideoError(null);
+      if (response.match) {
+        setStatusMessage(`Created calibration draft ${response.match.id}.`);
+        await refreshDashboard(response.match.id);
+        router.push(`/calibrate?match=${response.match.id}`);
+        return;
+      }
+      if (!response.job) {
+        throw new Error("Backend did not return a job or match draft.");
+      }
       setStatusMessage(`Queued job ${response.job.id}`);
       setPendingFile(null);
       setYoutubeUrl("");
       setMatchName("");
+      setSelectedCalibrationPresetId("");
+      setCalibrateBeforeProcessing(false);
       await refreshDashboard(response.job.match_id ?? undefined);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to queue source.");
@@ -917,6 +958,23 @@ export default function Home() {
               <form className="mt-4 space-y-4" onSubmit={handleSourceSubmit}>
                 <input value={matchName} onChange={(event) => setMatchName(event.target.value)} placeholder="Optional match name" className="w-full border-b border-white/15 bg-transparent px-1 py-3 text-sm outline-none placeholder:text-white/35" />
                 <input value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} placeholder="YouTube URL" className="w-full border-b border-white/15 bg-transparent px-1 py-3 text-sm outline-none placeholder:text-white/35" />
+                <div className="space-y-2">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-white/45">Calibration Preset</p>
+                  <div className="relative">
+                    <select value={selectedCalibrationPresetId} onChange={(event) => setSelectedCalibrationPresetId(event.target.value)} className={`w-full ${SELECT_CLASS}`}>
+                      <option value="">Default calibration</option>
+                      {calibrationPresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/50">⌄</span>
+                  </div>
+                  <p className="text-xs text-white/45">Pick a saved calibration before processing so the match only runs once.</p>
+                </div>
+                <label className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/75">
+                  <span>Calibrate this match before processing</span>
+                  <input type="checkbox" checked={calibrateBeforeProcessing} onChange={(event) => setCalibrateBeforeProcessing(event.target.checked)} className="h-4 w-4 accent-emerald-300" />
+                </label>
                 <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-dashed border-white/15 bg-white/5 px-4 py-4 text-sm text-white/70 hover:border-emerald-300/35 hover:bg-white/8">
                   <span>{pendingFile ? pendingFile.name : "Choose local match video"}</span>
                   <span className="rounded-full bg-white/10 px-3 py-1 text-xs">Browse</span>
@@ -1084,6 +1142,16 @@ export default function Home() {
 
                 <div className="relative aspect-[16/10]">
                   <canvas ref={fieldCanvasRef} className="absolute inset-0 h-full w-full" />
+                  <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/65 px-3 py-2 text-[11px] uppercase tracking-[0.2em] text-white/65 backdrop-blur">
+                    <span className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+                      Track
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-violet-400" />
+                      Fused
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 border-t border-white/10 px-6 py-4 text-sm text-white/60 md:grid-cols-3 xl:grid-cols-7">
@@ -1191,7 +1259,10 @@ export default function Home() {
                   {visibleTracks.map((track, index) => (
                     <button key={`${track.track_id}-${track.frame}-${track.time}-${index}`} onClick={() => setSelectedTrackId(track.track_id)} className={`w-full border-l-2 px-3 py-3 text-left transition ${selectedTrackId === track.track_id ? "border-amber-300 bg-amber-300/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"}`}>
                       <div className="flex items-center justify-between">
-                        <span className="font-medium">{selectedMatch?.labels[String(track.track_id)] ?? `Track ${track.track_id}`}</span>
+                        <span className="font-medium">
+                          {selectedMatch?.labels[String(track.track_id)] ?? `Track ${track.track_id}`}
+                          {isFusedTrack(track) ? <span className="ml-2 rounded-full bg-violet-400/20 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-violet-200">Fused</span> : null}
+                        </span>
                         <span className="text-xs text-white/45">{formatTime(track.time)}</span>
                       </div>
                       <p className="mt-2 text-sm text-white/60">x {track.x.toFixed(1)} in, y {track.y.toFixed(1)} in</p>

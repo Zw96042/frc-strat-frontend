@@ -53,6 +53,14 @@ export interface CalibrationEnvelope {
   views: ViewCalibration[];
 }
 
+export interface CalibrationPreset {
+  id: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+  calibration: CalibrationEnvelope;
+}
+
 export interface DetectionRecord {
   frame: number;
   time: number;

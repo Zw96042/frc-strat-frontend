@@ -1,5 +1,6 @@
 import {
   CalibrationEnvelope,
+  CalibrationPreset,
   JobRecord,
   MatchRecord,
   MatchSummary,
@@ -81,8 +82,10 @@ export async function deleteMatch(matchId: string): Promise<{ deleted: boolean; 
   );
 }
 
-export async function createSourceJob(formData: FormData): Promise<{ job: JobRecord }> {
+export async function createSourceJob(formData: FormData): Promise<{ job?: JobRecord; match?: MatchRecord }> {
   const file = formData.get("file");
+  const calibrationPresetId = formData.get("calibration_preset_id");
+  const calibrateFirst = formData.get("calibrate_first");
 
   if (file instanceof File) {
     const params = new URLSearchParams();
@@ -91,8 +94,14 @@ export async function createSourceJob(formData: FormData): Promise<{ job: JobRec
     if (typeof matchName === "string" && matchName.trim()) {
       params.set("match_name", matchName.trim());
     }
+    if (typeof calibrationPresetId === "string" && calibrationPresetId.trim()) {
+      params.set("calibration_preset_id", calibrationPresetId.trim());
+    }
+    if (calibrateFirst === "true") {
+      params.set("calibrate_first", "true");
+    }
 
-    return handleJson<{ job: JobRecord }>(
+    return handleJson<{ job?: JobRecord; match?: MatchRecord }>(
       await fetch(buildUrl(`/sources/upload?${params.toString()}`), {
         method: "POST",
         headers: {
@@ -103,13 +112,15 @@ export async function createSourceJob(formData: FormData): Promise<{ job: JobRec
     );
   }
 
-  return handleJson<{ job: JobRecord }>(
+  return handleJson<{ job?: JobRecord; match?: MatchRecord }>(
     await fetch(buildUrl("/sources"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         match_name: formData.get("match_name"),
         youtube_url: formData.get("youtube_url"),
+        calibration_preset_id: calibrationPresetId,
+        calibrate_first: calibrateFirst === "true",
       }),
     }),
   );
@@ -157,6 +168,28 @@ export async function updateCalibration(matchId: string, calibration: Calibratio
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(calibration),
+    }),
+  );
+}
+
+export async function fetchCalibrationPresets(): Promise<CalibrationPreset[]> {
+  return handleJson<CalibrationPreset[]>(await fetch(buildUrl("/calibration-presets"), { cache: "no-store" }));
+}
+
+export async function createCalibrationPreset(name: string, calibration: CalibrationEnvelope): Promise<{ preset: CalibrationPreset }> {
+  return handleJson<{ preset: CalibrationPreset }>(
+    await fetch(buildUrl("/calibration-presets"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, calibration }),
+    }),
+  );
+}
+
+export async function startMatchProcessing(matchId: string): Promise<{ job: JobRecord; match: MatchRecord }> {
+  return handleJson<{ job: JobRecord; match: MatchRecord }>(
+    await fetch(buildUrl(`/matches/${matchId}/start-processing`), {
+      method: "POST",
     }),
   );
 }
