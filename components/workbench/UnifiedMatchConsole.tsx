@@ -229,6 +229,8 @@ export default function UnifiedMatchConsole() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const playheadByMatchRef = useRef<Record<string, number>>({});
+  const resumePlaybackAfterReloadRef = useRef(false);
   const combinedFieldCanvasRef = useRef<HTMLCanvasElement>(null);
   const fuelFieldImageRef = useRef<HTMLImageElement | null>(null);
   const airProfileCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -269,6 +271,9 @@ export default function UnifiedMatchConsole() {
     setSelectedMatch(match);
     setLabelDrafts(match?.labels ?? {});
     if (resetView) {
+      if (matchId) {
+        playheadByMatchRef.current[matchId] = 0;
+      }
       setHeatmapTeam("all");
       setSelectedTrackId(null);
       setVideoMode("source");
@@ -277,6 +282,14 @@ export default function UnifiedMatchConsole() {
       setVideoError(null);
     }
   }, []);
+
+  const playableVideoUrl = useMemo(() => {
+    if (!selectedMatch) return null;
+    if (videoMode === "annotated") {
+      return resolveArtifactUrl(selectedMatch.artifacts.annotated_video ?? selectedMatch.artifacts.source_video);
+    }
+    return resolveArtifactUrl(selectedMatch.artifacts.source_video ?? selectedMatch.artifacts.annotated_video);
+  }, [selectedMatch, videoMode]);
 
   const refreshDashboard = useCallback(async (preferredMatchId?: string | null) => {
     const [jobItems, matchItems, presetItems, watchbotState] = await Promise.all([
@@ -392,7 +405,18 @@ export default function UnifiedMatchConsole() {
     const onEnded = () => setIsPlaying(false);
     const onLoadedMetadata = () => {
       setVideoDuration(video.duration || 0);
-      updateCurrentTime();
+      const savedTime = selectedMatchId ? playheadByMatchRef.current[selectedMatchId] ?? 0 : 0;
+      if (savedTime > 0 && Number.isFinite(video.duration) && video.duration > 0) {
+        const restoredTime = Math.min(savedTime, Math.max(0, video.duration - 0.05));
+        if (Math.abs(video.currentTime - restoredTime) > 0.05) {
+          video.currentTime = restoredTime;
+        }
+      }
+      updateCurrentTime(video.currentTime);
+      if (resumePlaybackAfterReloadRef.current && isPlaying) {
+        resumePlaybackAfterReloadRef.current = false;
+        void video.play().catch(() => undefined);
+      }
     };
     const onSeeked = () => updateCurrentTime();
 
@@ -420,7 +444,7 @@ export default function UnifiedMatchConsole() {
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("seeking", onSeeked);
     };
-  }, [selectedMatch?.id]);
+  }, [isPlaying, selectedMatch?.id, selectedMatchId]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -428,7 +452,17 @@ export default function UnifiedMatchConsole() {
     video.playbackRate = playbackSpeed;
     if (isPlaying) void video.play();
     else video.pause();
-  }, [isPlaying, playbackSpeed, selectedMatch?.id]);
+  }, [isPlaying, playbackSpeed, playableVideoUrl, selectedMatch?.id]);
+
+  useEffect(() => {
+    if (selectedMatchId) {
+      playheadByMatchRef.current[selectedMatchId] = currentTime;
+    }
+  }, [currentTime, selectedMatchId]);
+
+  useEffect(() => {
+    resumePlaybackAfterReloadRef.current = isPlaying;
+  }, [isPlaying, playableVideoUrl]);
 
   const enrichedMatches = useMemo(
     () => matches.map((match) => ({ match, ...parseMatchMetadata(match) })),
@@ -635,14 +669,6 @@ export default function UnifiedMatchConsole() {
       });
     return historyByTrack;
   }, [currentTime, trackUsesVisibleView, usableTracks]);
-
-  const playableVideoUrl = useMemo(() => {
-    if (!selectedMatch) return null;
-    if (videoMode === "annotated") {
-      return resolveArtifactUrl(selectedMatch.artifacts.annotated_video ?? selectedMatch.artifacts.source_video);
-    }
-    return resolveArtifactUrl(selectedMatch.artifacts.source_video ?? selectedMatch.artifacts.annotated_video);
-  }, [selectedMatch, videoMode]);
 
   const selectedSummary = useMemo(
     () => matches.find((match) => match.id === selectedMatchId) ?? null,
@@ -1332,6 +1358,28 @@ export default function UnifiedMatchConsole() {
                   {stageMode === "field" ? (
                     <>
                       <canvas ref={combinedFieldCanvasRef} className="desk-stage-field-canvas" />
+                      <div className="pointer-events-none absolute left-4 top-4 z-[2] max-w-[320px] rounded-2xl border border-white/10 bg-slate-950/78 px-4 py-3 text-[11px] text-white/75 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-[rgba(224,175,34,0.96)]" />
+                            Fuel on field
+                          </span>
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-[rgba(138,76,255,0.98)]" />
+                            Airborne fuel
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-3">
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-[3px] w-6 rounded-full bg-[rgba(147,197,253,0.55)]" />
+                            Robot trails
+                          </span>
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-3 w-3 rounded-sm border border-slate-100/80 bg-slate-200" />
+                            Robot positions
+                          </span>
+                        </div>
+                      </div>
                       {fuelArtifactsError || (!fieldMapData && fieldMapArtifactUrl) || !fieldMapArtifactUrl ? (
                         <div className="desk-stage-field-overlay pointer-events-none">
                           {fuelArtifactsError ? (
@@ -1495,6 +1543,47 @@ export default function UnifiedMatchConsole() {
                   {fuelAnalysis?.last_error ? (
                     <p className="mt-2 text-[12px] text-[var(--desk-danger)]">{fuelAnalysis.last_error}</p>
                   ) : null}
+                  <div className="mt-4 grid gap-2 text-[12px] text-[var(--desk-text-muted)]">
+                    <div className="rounded-xl border border-[var(--desk-border)] bg-[var(--desk-bg)] px-3 py-2">
+                      Field mode overlays fuel particles on top of robot trails and current robot positions.
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="desk-btn text-[12px]"
+                        onClick={() => setStageMode("field")}
+                      >
+                        Open field view
+                      </button>
+                      {fuelAnalysis?.artifacts?.overlay_video ? (
+                        <a
+                          href={resolveArtifactUrl(fuelAnalysis.artifacts.overlay_video) ?? "#"}
+                          target="_blank"
+                          className="desk-btn text-[12px]"
+                        >
+                          Fuel overlay video
+                        </a>
+                      ) : null}
+                      {fuelAnalysis?.artifacts?.field_map ? (
+                        <a
+                          href={resolveArtifactUrl(fuelAnalysis.artifacts.field_map) ?? "#"}
+                          target="_blank"
+                          className="desk-btn text-[12px]"
+                        >
+                          Field map JSON
+                        </a>
+                      ) : null}
+                      {fuelAnalysis?.artifacts?.process_log ? (
+                        <a
+                          href={resolveArtifactUrl(fuelAnalysis.artifacts.process_log) ?? "#"}
+                          target="_blank"
+                          className="desk-btn text-[12px]"
+                        >
+                          Fuel log
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
 
                 <p className="desk-section-label">Timeline</p>

@@ -103,6 +103,14 @@ export interface FuelCalibration {
   updated_at?: number | null;
 }
 
+export interface FuelCalibrationPreset {
+  id: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+  fuel_calibration: FuelCalibration;
+}
+
 export interface FuelArtifactSet {
   overlay_image?: string | null;
   overlay_transparent_image?: string | null;

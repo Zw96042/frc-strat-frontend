@@ -518,7 +518,7 @@ function CalibratePageContent() {
 
   const videoUrl = useMemo(() => {
     if (!match) return null;
-    return resolveArtifactUrl(match.artifacts.source_video ?? match.artifacts.annotated_video);
+    return resolveArtifactUrl(match.artifacts.annotated_video ?? match.artifacts.source_video);
   }, [match]);
 
   useEffect(() => {

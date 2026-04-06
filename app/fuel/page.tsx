@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  createFuelCalibrationPreset,
   fetchFuelState,
   fetchMatch,
   fetchMatches,
@@ -123,6 +124,7 @@ function FuelPageContent() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoWrapRef = useRef<HTMLDivElement>(null);
   const dirtyTargetsRef = useRef(dirtyTargets);
+  const playheadByMatchRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     dirtyTargetsRef.current = dirtyTargets;
@@ -183,7 +185,7 @@ function FuelPageContent() {
   }, [refreshSelected, selectedMatchId]);
 
   const sourceVideoUrl = useMemo(() => (
-    resolveArtifactUrl(selectedMatch?.artifacts.source_video ?? selectedMatch?.artifacts.annotated_video)
+    resolveArtifactUrl(selectedMatch?.artifacts.annotated_video ?? selectedMatch?.artifacts.source_video)
   ), [selectedMatch]);
 
   const overlayVideoUrl = useMemo(() => resolveArtifactUrl(fuelAnalysis?.artifacts.overlay_video), [fuelAnalysis]);
@@ -200,6 +202,9 @@ function FuelPageContent() {
   async function handleMatchChange(matchId: string) {
     try {
       setSelectedMatchId(matchId);
+      playheadByMatchRef.current[matchId] = 0;
+      setCurrentTime(0);
+      setVideoDuration(0);
       setVideoError(null);
       setDirtyTargets({
         ground_quad: false,
@@ -228,6 +233,27 @@ function FuelPageContent() {
       setStatusMessage(`Saved ${TARGET_LABELS[target].toLowerCase()}.`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : `Failed to save ${TARGET_LABELS[target].toLowerCase()}.`);
+    }
+  }
+
+  async function handleSavePreset() {
+    if (!fuelCalibration) return;
+    const suggestedName = `${selectedMatch ? getMatchTitle(selectedMatch) : "Match"} fuel`;
+    const name = window.prompt("Fuel preset name", suggestedName);
+    if (!name || !name.trim()) return;
+
+    try {
+      const payload: FuelCalibration = {
+        ground_quad: draftPoints.ground_quad.length === 4 ? orderQuadPoints(draftPoints.ground_quad) : null,
+        left_wall_quad: draftPoints.left_wall_quad.length === 4 ? orderQuadPoints(draftPoints.left_wall_quad) : null,
+        right_wall_quad: draftPoints.right_wall_quad.length === 4 ? orderQuadPoints(draftPoints.right_wall_quad) : null,
+        fuel_base_color: activeColor,
+        updated_at: fuelCalibration.updated_at ?? null,
+      };
+      await createFuelCalibrationPreset(name.trim(), payload);
+      setStatusMessage(`Saved fuel preset "${name.trim()}".`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to save fuel preset.");
     }
   }
 
@@ -418,6 +444,14 @@ function FuelPageContent() {
                     type="button"
                     className="desk-btn desk-btn--ghost text-[12px] disabled:opacity-40"
                     disabled={!selectedMatchId}
+                    onClick={() => void handleSavePreset()}
+                  >
+                    Save fuel preset
+                  </button>
+                  <button
+                    type="button"
+                    className="desk-btn desk-btn--ghost text-[12px] disabled:opacity-40"
+                    disabled={!selectedMatchId}
                     onClick={() => void handleClearTarget(selectedTarget)}
                   >
                     Clear
@@ -435,8 +469,26 @@ function FuelPageContent() {
                       playsInline
                       preload="metadata"
                       onLoadStart={() => setVideoError(null)}
-                      onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-                      onLoadedMetadata={(event) => setVideoDuration(event.currentTarget.duration || 0)}
+                      onTimeUpdate={(event) => {
+                        const nextTime = event.currentTarget.currentTime;
+                        setCurrentTime(nextTime);
+                        if (selectedMatchId) {
+                          playheadByMatchRef.current[selectedMatchId] = nextTime;
+                        }
+                      }}
+                      onLoadedMetadata={(event) => {
+                        const video = event.currentTarget;
+                        const duration = video.duration || 0;
+                        setVideoDuration(duration);
+                        const savedTime = selectedMatchId ? playheadByMatchRef.current[selectedMatchId] ?? 0 : 0;
+                        if (savedTime > 0 && Number.isFinite(duration) && duration > 0) {
+                          const restoredTime = Math.min(savedTime, Math.max(0, duration - 0.05));
+                          if (Math.abs(video.currentTime - restoredTime) > 0.05) {
+                            video.currentTime = restoredTime;
+                          }
+                        }
+                        setCurrentTime(video.currentTime);
+                      }}
                       onError={() => setVideoError(`Video failed to load`)}
                     />
                     <div

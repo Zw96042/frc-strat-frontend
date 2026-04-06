@@ -2,6 +2,7 @@ import {
   CalibrationEnvelope,
   FuelCalibration,
   FuelAnalysisRecord,
+  FuelCalibrationPreset,
   FuelStateResponse,
   CalibrationPreset,
   JobRecord,
@@ -301,6 +302,23 @@ export async function createCalibrationPreset(name: string, calibration: Calibra
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, calibration }),
+    }),
+  );
+}
+
+export async function fetchFuelCalibrationPresets(): Promise<FuelCalibrationPreset[]> {
+  return handleJson<FuelCalibrationPreset[]>(await fetch(buildUrl("/fuel-calibration-presets"), { cache: "no-store" }));
+}
+
+export async function createFuelCalibrationPreset(
+  name: string,
+  fuelCalibration: FuelCalibration,
+): Promise<{ preset: FuelCalibrationPreset }> {
+  return handleJson<{ preset: FuelCalibrationPreset }>(
+    await fetch(buildUrl("/fuel-calibration-presets"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, fuel_calibration: fuelCalibration }),
     }),
   );
 }
